@@ -1,0 +1,695 @@
+---
+title: 'HW2 SDS 2019'
+author: 'FERRI EGON 1700963'
+output:
+  prettydoc::html_pretty:
+    fig_width: 10
+    theme: cayman
+    highlight: github
+    self_contained: yes
+    toc: true
+    toc_depth: 4
+    number_sections: true
+    df.print: tibble
+    css: css_custom.css
+---
+<style>
+
+a:link {
+    color: lightblue;
+}
+a:visited{
+    color: cadetblue1;
+}
+a:hover {
+    color: aquamarine
+;
+    
+}
+
+
+</style>
+    
+```{r include=FALSE}
+require('MCMCglmm')
+require('invgamma')
+require('vapoRwave')
+require(ggplot2)
+require(viridis)
+require(tidyverse)
+require(R2jags)
+require(corrplot)
+require(matrixcalc)
+colorizer=vapoRwave::floralShoppe_pal()
+cols=colorizer(n=8)
+```
+
+# <pink>Bayes for dugongs</pink>
+
+## <span> Illustrate the characteristics of the statistical model for dealing with the *Dugong*'s data. </span>
+
+The model describes lengths ($Y_i$)  and  ages ($x_i$) of  27 dugongs ([sea cows](https://en.wikipedia.org/wiki/Dugong)) captured off the coast of Queensland. [Carlin and Gelfand (1991)](http://people.ee.duke.edu/~lcarin/Gelfand91.pdf) propose the following (non linear)  regression model:
+
+
+$$Y_i \sim N(\mu_i, \tau^2)$$
+$$\mu_i=f(x_i)= \alpha - \beta \gamma^{x_i}$$
+Model parameters are
+$\color{yellow} \alpha \in (1, \infty)$,
+$\color{orange} \beta \in (1, \infty)$,
+$\color{red} \gamma \in (0,1)$,
+$\color{violet}{\tau^2} \in (0,\infty)$, with proposed priors:
+\begin{eqnarray*}
+\color{yellow} \alpha &\sim&  N(0,\sigma^2_{\alpha})\\
+\color{orange} \beta  &\sim&  N(0,\sigma^2_{\beta}) \\
+\color{red} \gamma &\sim&  Unif(0,1)\\
+\color{violet}{\tau^2} &\sim&  IG(a,b)
+\end{eqnarray*}
+
+```{r warning=FALSE}
+df = read.csv("dugong-data.txt",sep="")
+X=df$Age
+Y=df$Length
+ggplot(df, aes(df$Age, df$Length))+
+  geom_point(aes(color=df$Age)) +
+  theme_minimal() +
+  new_retro()+
+  labs(title='DUGONGS AGE VS LENGTH')+xlab('Age')+ylab('Length')
+```
+
+
+
+## <span> Derive the corresponding likelihood function. </span>
+
+$$\mathcal L(\color{yellow} \alpha,\color{orange} \beta ,\color{red}\gamma ,\color{violet}{\tau^2}|Y) = \prod_{i=1}^n \frac{1}{\sqrt{2\pi\color{violet}{\tau^2}}}e^{-\frac{(y_i-\mu_i)^2}{2\color{violet}{\tau^2}}}  \mathbb I_{(1, \infty)}(\color{yellow} \alpha)\mathbb I_{(1, \infty)}(\color{orange} \beta)\mathbb I_{(0,1)}(\color{red}\gamma)\mathbb I_{(0, \infty)}(\color{violet}{\tau^2})$$
+
+$$= \Bigg( \frac{1}{{2\pi\color{violet}{\tau^2}}}\Bigg)^{\frac{n}{2}}e^{ -\frac{1}{2\color{violet}{\tau^2}}\sum_{i=1}^n(y_i-\color{yellow} \alpha+\color{orange} \beta\color{red}\gamma^{x_i})^2}\mathbb I_{(1, \infty)}(\color{yellow} \alpha)\mathbb I_{(1, \infty)}(\color{orange} \beta)\mathbb I_{(0,1)}(\color{red}\gamma)\mathbb I_{(0, \infty)}(\color{violet}{\tau^2})$$
+
+
+
+## <span> Write down the expression of the joint prior distribution of the parameters at stake and illustrate your suitable choice for the hyperparameters. </span>
+
+The joint prior distribution is defined as the joint of the marginal priors (if we assume independence between parameters):
+
+$$ \prod^p_{i=1} \pi_i (\theta_i)= \color{yellow} {\pi(\alpha)}\color{orange}{\pi( \beta)}\color{red}{\pi(\gamma)} \color{violet}{\pi({\tau^2})}$$
+
+Marginal priors:
+$$\color{yellow}{\pi( \alpha) }= \frac{1}{\sqrt{2\pi\sigma^2_{\alpha}}}e^{ -\frac{\alpha^2}{2\sigma^2_{\alpha}}}\mathbb I_{(1, \infty)}(\alpha) \propto e^{ -\frac{\alpha^2}{2\sigma^2_{\alpha}}}\mathbb I_{(1, \infty)}( \alpha) $$
+
+$$\color{orange}{\pi( \beta)  }= \frac{1}{\sqrt{2\pi\sigma^2_{\beta}}}e^{ -\frac{\beta^2}{2\sigma^2_{\beta}}}\mathbb I_{(1, \infty)}(\beta) \propto e^{ -\frac{\beta^2}{2\sigma^2_{\beta}}}\mathbb I_{(1, \infty)}( \beta)$$
+$$\color{red}{\pi(\gamma)}=\mathbb I_{(0,1)}(\gamma)$$
+
+$$\color{violet}{\pi(\tau^2)} = \frac{b^a}{\Gamma(a)} \frac{1}{\tau^{2(a+1)}}e^{ -\frac{b}{\tau^2}}\mathbb I_{(0, \infty)}(\tau^2) \propto \frac{1}{\tau^{2(a+1)}}e^{ -\frac{b}{\tau^2}}\mathbb I_{(0, \infty)}(\tau^2)$$
+Joint prior distribution:
+$$\prod^p_{i=1} \pi_i (\theta_i) \color{yellow}{\propto e^{ -\frac{\alpha^2}{2\sigma^2_{\alpha}}}\mathbb I_{(1, \infty)}( \alpha)} \color{orange}{e^{ -\frac{\beta^2}{2\sigma^2_{\beta}}}\mathbb I_{(1, \infty)}( \beta)} \color{red}{\mathbb I_{(0,1)}(\gamma)} \color{violet}{\frac{1}{\tau^{2(a+1)}}e^{ -\frac{b}{\tau^2}}\mathbb I_{(0, \infty)}(\tau^2)}$$
+
+$$= \frac{e^{-\Big(\frac{\alpha^2}{2\sigma^2_{\alpha}} + \frac{\beta^2}{2\sigma^2_{\beta}}+ \frac{b}{\tau^2}\Big)}}{\tau^{2(a+1)}}\mathbb I_{(1, \infty)}( \alpha)\mathbb I_{(1, \infty)}( \beta)\mathbb I_{(0, 1)}( \gamma)\mathbb I_{(0, \infty)}( \tau^2)$$
+For the hyper-parameters the choice is to be as much vague as possible. So:
+
+
+$$\sigma_{\alpha}= 10000 $$
+$$\sigma_{\beta}= 10000 $$
+$$a= 0.001 $$
+$$b= 0.001$$
+
+
+
+
+
+
+
+## <span> Derive the functional form  (up to proportionality constants) of all *full-conditionals*. </span>
+
+Given a target $π(θ) = π(θ_1, ..., θ_k)$ the corresponding full conditionals will be denoted with $$π(θ_i∣θ_{(i)}) = π(θ_i∣θ_1, θ_2, ..., θ_{i−1}, θ_{i+1}, ..., θ_k)$$
+
+In Bayesian inference one can easily determine the full conditionals looking at the functional form of the posterior $π(θ∣Y)$ simply regarded as a function of one component $$π(θ_i∣θ_{(i)}, Y) \propto π(θ∣Y) \propto \mathcal L(\theta|Y) \pi(\theta)$$
+
+### $\alpha$ 
+
+$$\color{yellow}{\pi(\alpha \mid \beta,\gamma, \tau^2,Y)}=\pi(Y | \alpha, \beta, \gamma, \tau^2 )\pi(\alpha) \propto \mathcal L(\alpha, \beta, \gamma, \tau^2 \mid Y)\pi(\alpha) \propto $$
+
+$$ \propto e^{ -\frac{1}{2\tau^2}\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2}\underbrace{\color{aquamarine}{\mathbb I_{(1, \infty)}(\alpha)\mathbb I_{(1, \infty)}( \beta)\mathbb I_{(0,1)}(\gamma)\mathbb I_{(0, \infty)}(\tau^2)}}_\color{aquamarine}{\mathbb I}\cdot e^{ -\frac{\alpha^2}{2\sigma^2_{\alpha}}} \color{aquamarine}{\mathbb I_{(1, \infty)}( \alpha)}= $$
+
+$$=\color{aquamarine}{\mathbb I} e^{ -\frac{1}{2\tau^2}\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2+\frac{a^2}{2\sigma^2_a}} =\color{aquamarine}{\mathbb I} e^{ -\frac{\sigma_a^2\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2+\tau^2\alpha^2}{2\tau^2\sigma_\alpha^2}} =$$
+$$= \color{aquamarine}{\mathbb I} e^{ -\frac{\sigma_a^2\sum_{i=1}^n(y_i^2+\alpha^2+\beta\gamma^{2x_i}-2\alpha y_i +2\beta\gamma^{x_i}y_i-2\alpha\beta\gamma^{x_i})+\tau^2\alpha^2}{2\tau^2\sigma_\alpha^2}} \propto \color{aquamarine}{\mathbb I} e^{ -\frac{\sigma_a^2\sum_{i=1}^n(\alpha^2-2\alpha(yi+\beta\gamma^{x_i}))+\tau^2\alpha^2}{2\tau^2\sigma_\alpha^2}} =$$
+
+$$= \color{aquamarine}{\mathbb I} e^{-\frac{\alpha^2(\sigma_\alpha^2n+\tau^2)-2\alpha\sigma_a^2\sum_{i=1}^n(y_i+\beta\gamma^{x_i})}{2\tau^2\sigma_\alpha^2}}= \color{aquamarine}{\mathbb I}e^{-\frac{\alpha^2-(2\alpha\sigma_a^2\sum_{i=1}^n(y_i+\beta\gamma^{x_i}))/(\sigma_\alpha^2n+\tau^2)}{2(\tau^2\sigma_\alpha^2)/(\sigma_\alpha^2n+\tau^2)}} \propto$$
+$$\propto \color{yellow}{e^{-\frac{(\alpha-\sigma_a^2\sum_{i=1}^n(y_i+\beta\gamma^{x_i})/(\sigma_\alpha^2n+\tau^2))^2}{2(\tau^2\sigma_\alpha^2)/(\sigma_\alpha^2n+\tau^2)}}}\color{aquamarine}{\mathbb I_{(1, \infty)}(\alpha)}$$
+
+### $\beta$
+
+
+$$\color{orange}{\pi(\beta \mid \alpha,\gamma, \tau^2,Y)}=\pi(Y | \alpha, \beta, \gamma, \tau^2 )\pi(\beta) \propto \mathcal L(\alpha, \beta, \gamma, \tau^2 \mid Y)\pi(\beta) \propto $$
+
+$$ \propto e^{ -\frac{1}{2\tau^2}\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2}\underbrace{\color{aquamarine}{\mathbb I_{(1, \infty)}(\alpha)\mathbb I_{(1, \infty)}( \beta)\mathbb I_{(0,1)}(\gamma)\mathbb I_{(0, \infty)}(\tau^2)}}_\color{aquamarine}{\mathbb I}\cdot e^{ -\frac{\beta^2}{2\sigma^2_{\beta}}} \color{aquamarine}{\mathbb I_{(1, \infty)}( \beta)}= $$
+
+
+$$=\color{aquamarine}{\mathbb I} e^{ -\frac{1}{2\tau^2}\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2+\frac{\beta^2}{2\sigma^2_\beta}} =\color{aquamarine}{\mathbb I} e^{ -\frac{\sigma_\beta^2\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2+\tau^2\beta^2}{2\tau^2\sigma_\beta^2}} =$$
+
+$$= \color{aquamarine}{\mathbb I} e^{ -\frac{\sigma_\beta^2\sum_{i=1}^n(y_i^2+\alpha^2+\beta^2\gamma^{2x_i}-2\alpha y_i +2\beta\gamma^{x_i}y_i-2\alpha\beta\gamma^{x_i})+\tau^2\beta^2}{2\tau^2\sigma_\beta^2}} \propto \color{aquamarine}{\mathbb I} e^{ -\frac{\sigma_\beta^2\sum_{i=1}^n(\beta^2\gamma^{2x_i}-2\beta\gamma^{x_i}(\alpha-y_i))+\tau^2\beta^2}{2\tau^2\sigma_\beta^2}} =$$
+
+$$= \color{aquamarine}{\mathbb I} e^{-\frac{\beta^2(\sigma_\beta^2\sum_{i=1}^n\gamma^{2x_i}+\tau^2)-2\beta\sigma_\beta^2\sum_{i=1}^n\gamma^{x_i}(\alpha-y_i)}{2\tau^2\sigma_\beta^2}}=\color{aquamarine}{\mathbb I}e^{-\frac{\beta^2-2\beta\sigma_\beta^2\sum_{i=1}^n\gamma^{x_i}(\alpha-y_i)/(\sigma_\beta^2\sum_{i=1}^n\gamma^{2x_i}+\tau^2)}{2\tau^2\sigma_\beta^2/(\sigma_\beta^2\sum_{i=1}^n\gamma^{2x_i}+\tau^2)}} \propto$$
+
+$$\color{orange}{\propto e^{-\frac{(\beta-\sigma_\beta^2\sum_{i=1}^n\gamma^{x_i}(\alpha-y_i)/(\sigma_\beta^2\sum_{i=1}^n\gamma^{2x_i}+\tau^2))^2}{2(\tau^2\sigma_\beta^2)/(\sigma_\beta^2\sum_{i=1}^n\gamma^{2x_i}+\tau^2)}}}\color{aquamarine}{\mathbb I_{(1, \infty)}( \beta)}$$
+
+### $\gamma$
+
+$$\color{red}{\pi(\gamma \mid \alpha,\beta, \tau^2,x, y)}=\pi(Y | \alpha, \beta, \gamma, \tau^2 )\pi(\gamma) \propto \mathcal L(\alpha, \beta, \gamma, \tau^2 \mid Y)\pi(\gamma) \propto $$
+
+$$ \propto e^{ -\frac{1}{2\tau^2}\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2}\underbrace{\color{aquamarine}{\mathbb I_{(1, \infty)}(\alpha)\mathbb I_{(1, \infty)}( \beta)\mathbb I_{(0,1)}(\gamma)\mathbb I_{(0, \infty)}(\tau^2)}}_\color{aquamarine}{\mathbb I}\cdot \color{aquamarine}{\mathbb I_{(0, 1)}(\gamma)}=$$
+$$=\color{red}{e^{-\frac{1}{2\tau^2}\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2}}\color{aquamarine}{\mathbb I_{(0,1)}(\gamma)}$$
+
+
+### $\tau^2$
+
+$$\color{violet}{\pi(\tau^2 \mid \alpha,\beta, \gamma,x, y)}=\pi(Y | \alpha, \beta, \gamma, \tau^2 )\pi(\tau^2) \propto \mathcal L(\alpha, \beta, \gamma, \tau^2 \mid Y)\pi(\tau^2) \propto $$
+
+$$\propto \frac{1}{\tau^{2(\frac{n}{2})}} e^{ -\frac{1}{2\tau^2}\sum_{i=1}^n(y_i-\alpha+\beta\gamma^{x_i})^2}\underbrace{\color{aquamarine}{\mathbb I_{(1, \infty)}(\alpha)\mathbb I_{(1, \infty)}( \beta)\mathbb I_{(0,1)}(\gamma)\mathbb I_{(0, \infty)}(\tau^2)}}_\color{aquamarine}{\mathbb I}\cdot\frac{1}{\tau^{2(a+1)}}e^{ -\frac{b}{\tau^2}}\color{aquamarine}{\mathbb I_{(0, \infty)}(\tau^2)}$$
+$$\propto \color{violet}{ \frac{1}{\tau^{2(a+1+\frac{n}{2})}}e^{-\frac{b+\frac{1}{2}\sum^n_{i=1} (y_i-\alpha+\beta\gamma^{x_i})^2}{\tau^2}}}\color{aquamarine}{\mathbb I_{(0, \infty)}(\tau^2)} \propto$$
+
+## <span> Which distribution can you recognize within standard parametric families so that direct simulation from full conditional can be easily implemented? </span>
+
+Parameter $\alpha$ full conditional is proportional to a truncated normal.
+
+$$\color{yellow}{\pi(\alpha \mid \beta,\gamma, \tau^2,x, y)}\sim N\Big( \frac{\sigma^2_{\alpha} \sum_{i=1}^{n} (y_i + \beta \gamma^{x_i} )}{n\sigma^2_{\alpha} + \tau^2}, \frac{\tau^2\sigma^2_{\alpha}}{n\sigma^2_{\alpha} + \tau^2} \Big)\color{aquamarine}{\mathbb I_{(1, \infty)}(\alpha)}$$
+Parameter $\beta$ full conditional is proportional to a truncated normal.
+
+
+$$\color{orange}{\pi(\beta \mid \alpha, \gamma, \tau^2, x, y)} \sim N \Bigg(\frac{\sigma^2_{\beta} \sum_{i=1}^n\gamma^{x_i}(\alpha - y_i)}{\tau^2 + \sigma^2_{\beta}\sum_{i=1}^n\gamma^{2x_i}}, \frac{\tau^2\sigma^2_{\beta}}{\tau^2 + \sigma^2_{\beta}\sum_{i=1}^n\gamma^{2x_i}} \Bigg)\color{aquamarine}{\mathbb I_{(1, \infty)}( \beta)}$$
+
+Parameter $\gamma$ full conditional is not recognizable as a well-known parametric family.
+
+Parameter $\tau^2$ full conditional is proportional to an inverse gamma.
+
+$$\color{violet}{\pi(\tau^2 \mid \alpha, \beta,\gamma, x, y)} \sim IG\bigg(a + \frac{n}{2}, b+\frac{1}{2}\displaystyle\sum_{i=1}^{n}(y_i-\alpha+ \beta\gamma^{x_i})^2 \bigg)$$
+
+## <span> Using a suitable Metropolis-within-Gibbs algorithm simulate a Markov chain ($T=10000$) to approximate the posterior distribution for the above model. </span>
+
+Let's start to code!
+
+The first ingredient we need to build up our Markov chain is the set of full-conditional functions.
+
+For the three parameters with well known function is as easy as it gets:
+
+```{r}
+alpha_fc <- function(x=X, y=Y, sigma_a=10000, beta,gamma, taus) {
+  n=length(y)
+  alpha=rtnorm(n=1, mean=(sigma_a*sum(y+beta*gamma^x))/(n*sigma_a+taus), 
+         sd = (taus*sigma_a)/(n*sigma_a+taus), lower = 1, upper= Inf)
+  return (alpha)
+}
+
+beta_fc <- function(x=X, y=Y, sigma_b=10000, alpha,gamma, taus) {
+  n=length(y)
+  beta=rtnorm(n=1, mean=sigma_b*sum((gamma^x)*(alpha-y))/(sigma_b*sum(gamma^(2*x)+taus)), 
+         sd = (taus*sigma_b)/(sigma_b*sum(gamma^(2*x)+taus)), lower = 1, upper= Inf)
+  return (beta)
+}
+
+
+tau_fc <-function(x=X, y=Y, a=0.001,b=0.001, alpha,beta, gamma) {
+  n=length(y)
+  taus= invgamma::rinvgamma(n = 1, shape = a+ n/2, rate = 0.5*sum((y-alpha+beta*gamma^x)^2))
+  return (taus)
+}
+```
+
+For the gamma parameter, since we can't simulate from a famous function, we need to use a different method to simulate values from the full conditional. We use the so called "random walk metropolis" algorithm.
+
+The method is based on the generation of 'proposed' values that are accepted or rejected in order to converge to the desired  $p(x)$ distribution from a starting point $x_1$.
+Algorithm steps:
+
+1. generate a candidate from a simmetric proposal distribution (in this case I chose $unif(x_{i}-\delta ,x_{i}+\delta), with \ \delta=0.1$) denoted as $y_i$.
+2. calculate the acceptance probability
+
+$$w_i= min\bigg(\frac{p(y_i)}{p(x_i)},1\bigg)$$
+  
+3. accept the new value $y_i$ with probability $w_i$ (or probability 1 if $w_i \geq 1$). If the value is rejected we keep the old value.
+
+
+```{r}
+full_cond_gamma = function(gamma, alpha, beta, taus,x=X, y=Y) {
+  return(exp(-1/(2*taus)*sum((y-alpha+beta*gamma^x)^2)))
+}
+
+
+gamma_fc<- function(x=X, y=Y, gamma_old, alpha, beta, taus){
+  proposal = gamma_old+runif(1, -0.1, 0.1)
+  weigth = full_cond_gamma(proposal, alpha, beta, taus)/full_cond_gamma(gamma_old, alpha, beta, taus)
+  test=runif(1,0,1)
+  gamma_new = ifelse(test <= weigth, proposal, gamma_old)
+  return(gamma_new)
+}
+
+```
+
+Now that we have the full conditional, we can create the algorithm that runs our Markov chain, given the initial values of the parameters and the number of simulation.
+
+```{r}
+MCMC<- function(alpha_init=2, beta_init=1, taus_init=0.1, gamma_init=0.7, nsim=100000){
+  alphas=c(alpha_init)
+  betas=c(beta_init)
+  gammas=c(gamma_init)
+  tauss=c(taus_init)
+  for (i in 1:(nsim-1)){
+    alphas[i+1]=alpha_fc(beta = betas[i], gamma=gammas[i],taus=tauss[i])
+    betas[i+1]=beta_fc(alpha = alphas[i+1], gamma=gammas[i],taus=tauss[i])
+    gammas[i+1]=gamma_fc(alpha = alphas[i+1], beta = betas[i+1], gamma_old = gammas[i], taus=tauss[i])
+    tauss[i+1]=tau_fc(alpha = alphas[i+1], beta=betas[i+1], gamma = gammas[i+1])
+  }
+  result=data.frame(alphas, betas, gammas, tauss)
+  return(result)
+}
+```
+
+It's better to initialize three chains from different starting points to check the results. If everything will work fine the three chains will converge toward the true value.
+
+```{r}
+chain1=MCMC(alpha_init = 0.1, beta_init = 0.1, gamma_init = 0.5, taus_init = 0.005)
+chain2=MCMC(alpha_init = 2, beta_init = 1, gamma_init = 0.7, taus_init = 0.008)
+chain3=MCMC(alpha_init = 4, beta_init = 2, gamma_init = 1, taus_init = 0.01)
+```
+
+
+## <span> Show the 4 univariate trace-plots of the simulations of each parameter. </span>
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(chain1$alphas, type='l', ylim=c(2,3), col=cols[2], xlab = "iterations", main="alpha trace plot", ylab=expression(alpha))
+lines(chain2$alphas, col=cols[3])
+lines(chain3$alphas, col=cols[4])
+
+plot(chain1$betas, type='l', ylim=c(0.99,1.01), col=cols[2], xlab = "iterations", main="beta trace plot", ylab=expression(beta))
+lines(chain2$betas, col=cols[3])
+lines(chain3$betas, col=cols[4])
+
+plot(chain1$gammas, type='l', ylim=c(0.7,1), col=cols[2], xlab = "iterations", main="gamma trace plot", ylab=expression(gamma))
+lines(chain2$gammas, col=cols[3])
+lines(chain3$gammas, col=cols[4])
+
+plot(chain1$tauss, type='l', ylim=c(0,0.1), col=cols[2], xlab = "iterations", main="tau trace plot", ylab = expression(tau^2))
+lines(chain2$tauss, col=cols[3])
+lines(chain3$tauss, col=cols[4])
+
+
+```
+
+Result confirmed! the three chains converge to the same stationary distribution quickly enough.
+
+
+## <span> Evaluate graphically the behaviour of the empirical averages $\hat{I}_t$  with growing $t=1,...,T$. </span>
+
+```{r}
+for (i in 1:4){
+  par= chain1 %>% select(i)
+  par2= chain2 %>% select(i)
+  par3= chain3 %>% select(i)
+  
+  name=names(par)
+  values=par[,1]
+  values2=par2[,1]
+  values3=par3[,1]
+  media=mean(values)
+  
+  
+  runningmean=cumsum(values)/(1:length(values))
+  runningmean2=cumsum(values2)/(1:length(values))
+  runningmean3=cumsum(values3)/(1:length(values))
+  
+  plot(runningmean, type="l", main=paste("Behaviour of the empirical average of",name), xlab="iterations", ylab='running mean', col=cols[2], lwd=3,
+       ylim=c(media-media*0.5, media+media*0.3))
+  lines(runningmean2, col=cols[3], lwd=3)
+  lines(runningmean3, col=cols[4], lwd=3)
+  abline(h=mean(values), col=cols[7], lwd=2, lty=2)}
+```
+
+Our empirical averages converges to the estimate mean quickly enough. The only parameter that would need a little bit of more time is tau square (but only when we initialize it's chain from a relatively high point). 
+
+## <span> Provide estimates for each parameter together with the approximation error and explain how you have evaluated such error. </span>
+
+### <span> Point estimates </span>
+
+We can use the Markov chain to get point estimates by taking the expected value of each parameter.
+
+$$\hat{I} = \frac{1}{t}\sum_{i=T_0+1}^{T_0+t}h(\theta_i) \xrightarrow{\text{a.s.}} E_{\pi}[h(\theta)]= I  \quad \text{for  }\quad t \xrightarrow{}\infty$$
+
+To get a better approximation we can burn the first part of the chain (since it's influenced a lot by the initial values).
+
+From now on we drop first and third chain to work only on the second. Obviously we could choose another of the two, or both, to make a comparative (or more complex by combination) analysis, but this is not our scope at the moment.
+
+```{r}
+len=length(chain2$alphas)
+burned_chain=chain2[(len/10+1):len,]
+summary(burned_chain)
+
+alpha_hat=round(mean(burned_chain$alphas),3)
+beta_hat=round(mean(burned_chain$betas),3)
+gamma_hat=round(mean(burned_chain$gammas),3)
+taus_hat=round(mean(burned_chain$tauss),3)
+
+estimates=c(alpha_hat, beta_hat, gamma_hat, taus_hat)
+```
+
+```{r message=FALSE, warning=FALSE}
+dug=function(x){alpha_hat-gamma_hat^x}
+dug_low=function(x){qnorm(p = .25, mean = alpha_hat-gamma_hat^x, sd = taus_hat^0.5)}
+dug_up=function(x){qnorm(p = .75, mean = alpha_hat-gamma_hat^x, sd = taus_hat^0.5)}
+
+X=df$Age
+Y=df$Length
+ggplot(df, aes(df$Age, df$Length))+
+  geom_point(col=cols[6]) +
+  theme_minimal() +
+  new_retro()+
+  stat_function(fun= dug, col=cols[2], lwd=1)+
+  stat_function(fun= dug_low, col=cols[3], lwd=1)+
+  stat_function(fun= dug_up, col=cols[3], lwd=1)+
+  labs(title='DUGONGS LENGTH VS AGE')+xlab('Age')+ylab('Length')
+```
+
+### <span> Approximation error </span>
+
+We can estimate the approximation error with:
+
+$$\sigma^2_{\hat I_t}= Var[\hat I_t]= \frac{Var_\pi[h(X_1)]}{t_{eff}} \ \ where \ \ \ t_{eff}= \frac{t}{1+2 \sum^\infty_{k=1}\rho_k}$$
+
+It's important to take into account the auto-correlation of each chain.
+
+```{r}
+par(mfrow=c(2,2))
+acf(burned_chain$alphas)
+acf(burned_chain$betas)
+acf(burned_chain$gammas)
+acf(burned_chain$tauss)
+```
+
+hence
+
+```{r}
+eff=effectiveSize(burned_chain)
+eff
+```
+
+```{r}
+Variances=diag(var(burned_chain))
+approximated_error=Variances/eff
+approximated_error
+```
+
+## <span> Which parameter has the largest posterior uncertainty? How did  you measure it? </span>
+
+We can use the $\frac{\hat \sigma}{\hat \theta}$ metric to asses the posterior uncertainty. 
+
+```{r}
+(Variances^0.5)/estimates
+```
+
+
+Tau squared has the largest posterior uncertainty, closely followed by alpha and gamma. Beta is the most sure.
+
+
+## <span> Which couple of parameters has the largest correlation (in absolute value)? </span>
+
+```{r}
+cor(burned_chain)
+corrplot(cor(burned_chain))
+```
+
+Alpha and gamma are almost perfectly correlated.
+
+
+## <span> Use the Markov chain to approximate the posterior predictive distribution of the length  of a dugong with age of 20 years. </span>
+
+
+```{r}
+
+
+years_20_prediction = c()
+
+for(i in 1:length(burned_chain$alphas)){
+  years_20_prediction[i] = rnorm(1, burned_chain$alphas[i] - burned_chain$betas[i]*burned_chain$gammas[i]^20, sqrt(burned_chain$tauss[i]))
+  
+}
+
+y20dugo = mean(years_20_prediction)
+y20dugo
+```
+
+
+## <span> Provide the prediction of a different dugong with age 30.  </span>
+
+```{r}
+years_30_prediction = c()
+
+for(i in 1:length(burned_chain$alphas)){
+  years_30_prediction[i] = rnorm(1, burned_chain$alphas[i] - burned_chain$betas[i]*burned_chain$gammas[i]^30, sqrt(burned_chain$tauss[i]))
+  
+}
+
+y30dugo = mean(years_30_prediction)
+y30dugo
+```
+
+
+```{r}
+
+pred=data.frame(years_20_prediction, years_30_prediction)
+eff_pred=effectiveSize(pred)
+
+
+pred_Variances=diag(var(pred))
+pred_approximated_error=pred_Variances/eff_pred
+pred_approximated_error
+```
+
+
+
+## <span> Which prediction is less precise? </span>
+
+The prediction for the 30 old dugong has the bigger error, so is less precise.
+
+# <pink>Markov chain</pink>
+Let us consider a Markov chain $(X_t)_{t \geq 0}$ defined on the state space ${\cal S}=\{1,2,3\}$ with the following transition:
+
+<center> ![](transition.PNG) </center>
+
+## <span> Starting at time $t=0$ in the state  $X_0=1$ simulate the Markov chain with distribution assigned as above for $t=1000$ consecutive times </span>
+
+A Markov chain on a discrete state space $\cal S$ is a stochastic process indexed by a discrete time index t $\{X_t;t = 0, 1, ...\}$ such that $\forall \ \ i,j,r,s \in \cal S$
+$$Pr\{X_{t+1} = r∣X_0 = i,X_1 = j, ...,X_t = s\} = Pr\{X_{t+1} = r∣X_t = s\}$$
+
+(The future is independent from the past given the present)
+
+A Markov chain on a discrete state space S is homogeneous if
+$$Pr\{X_{t+1} = r∣X_t = s\} = p_{sr}  \forall t\in \cal T$$
+The (stochastic) matrix P with generic entry $p_{sr}$ is called transition probability matrix.
+
+
+
+To simulate a Markov chain we need three ingredients(in this case easy to get from the graph); 
+  
+  * The state space
+
+```{r}
+S= c(1, 2, 3)
+```
+
+
+  * The transition matrix
+
+```{r}
+tpm <- matrix(c(0, 1/2, 1/2, 5/8, 1/8, 1/4, 2/3, 1/3, 0),nrow=3,byrow=T)
+tpm
+```
+
+
+  * The starting value of the chain(this is left to our freedom)
+  
+  
+Now that we have all the ingredients, we can start the chain:
+
+```{r}
+
+
+markov_chain <- function(t=1000, space=S, start=1, matrix=tpm){
+  chain <- c(start)
+  for(t in 1:(t-1)){
+    chain[t+1]<-sample(space,size=1,prob=matrix[chain[t],])
+  }
+  return(chain)
+}
+
+```
+
+
+```{r}
+chain_1 = markov_chain()
+
+
+plot(chain_1[1:75],type="l",main="Trace plot", sub="Random walk",xlab="t",ylab="chain state at time t", col=cols[2], lwd=2)
+```
+
+
+## <span> compute the empirical relative frequency of the three states in your simulation </span>
+
+
+```{r}
+table(chain_1)
+
+prop.table(table(chain_1))
+```
+
+  
+## <span> repeat the simulation for 500 times and record only the final state at time $t=1000$ for each of the 500 simulated chains. Compute the relative  frequency of the 500 final states. What distribution are you approximating in this way? Try to formalize the difference between this point and the previous point.  </span>
+
+```{r}
+final_states = c()
+t=length(chain_1)
+for (i in 1:500){
+  chain_ = markov_chain(t=1000)
+  final_states[i] = chain_[t]
+  
+}
+```
+
+```{r}
+table(final_states)
+
+prop.table(table(final_states))
+```
+
+```{r}
+histo = rbind(prop.table(table(chain_1)), prop.table(table(final_states)))
+
+barplot(histo, col = c(cols[2], cols[3]),border = 'white', main = 'Relative frequencies of MC and final state', beside = T , names.arg=c("S = 1", "S = 2", "S = 3"), legend = c("MC",'final state'))
+```
+
+In the first case we are evaluating the probability from the frequency using the common property of Monte Carlo simulations.
+
+$$\hat{I} = \frac{1}{t}\sum_{i=T_0+1}^{T_0+t}h(\theta_i) \xrightarrow{\text{a.s.}} E_{\pi}[h(\theta)]= I  \quad \text{for  }\quad t \xrightarrow{}\infty$$
+
+In the second case we are taking the last step of the Markov chain to estimate frequencies. If we have simulated enough values to be already in equilibrium, $Pr_π\{X_t ∈ A\} = π(A)$.
+
+So if t is big enough, the two probability should by almost identical.
+
+From the graph we see that we are almost there, but 1000 step of chains and 500 simulations are not enough to be super-precise. In the next answers we'll explore better this problem.
+
+## <span> compute the theoretical stationary distribution $\pi$ and explain how you have obtained it. </span>
+
+The stationary distribution $π = (π_1, π_2)^T$ must satisfy the equations:
+
+$$\cases{π_1p_{11} + π_2p_{21} = π_1\\π_1p_{12} + π_2p_{22} = π_2}$$
+which can be re-written in matrix notation as follows:
+
+
+$$P^T π = π$$
+
+Hence π must be one of the possible solutions of the following characteristic system of equations:
+
+
+$$(P^T − λI)π = 0$$
+
+corresponding to λ = 1 or, equivalently, π must be in the eigenspace corresponding to the eigenvalue λ = 1. However, there are infinite possible such solutions. The only one we are interested in is the solution π such that $π_1 + π_2 = 1$.
+
+
+
+```{r}
+eigen(t(tpm))
+
+```
+
+
+Renormalize the eigenvector correpsonding to the eigenvalue equal to 1:
+
+```{r}
+pi <- eigen(t(tpm))$vector[,1]/sum(eigen(t(tpm))$vector[,1])
+pi
+```
+
+It's easy to verify that the solution satisfies the stationary equations for our markov chain.
+```{r}
+for(i in c(1,2,10,30,40,50)) {
+  print(paste(i, 'iterations'))
+  print(matrix.power(tpm,i))
+}
+
+```
+
+We see that our matrix power already converges around the 40th moltiplication.
+
+```{r}
+stationary_distr=pi
+
+```
+
+```{r}
+histo = rbind(prop.table(table(chain_1)), prop.table(table(final_states)), stationary_distr)
+
+barplot(histo, col = c(cols[2], cols[3], cols[4]),border = 'white', main = 'Relative frequencies of MC and final state', beside = T , names.arg=c("S = 1", "S = 2", "S = 3"), legend = c("MC",'final state', 'stationary distr'))
+```
+
+
+
+
+## <span> Is it well approximated by the simulated empirical relative frequencies computed in 2.6 and 2.7? </span>
+
+Is it approximated quite well, altough is it not perfect, to understand why we can plot the running mean of the three parameters and analyze it's behaviour.
+
+```{r}
+chain_1 = markov_chain(t=5000)
+runningmeans=cumsum(chain_1==1)/(1:length(chain_1))
+plot(1:length(chain_1),runningmeans, type='l', col=cols[2], ylim=c(0.1,0.5))
+runningmeans2=cumsum(chain_1==2)/(1:length(chain_1))
+runningmeans3=cumsum(chain_1==3)/(1:length(chain_1))
+lines(runningmeans2, col=cols[3])
+lines(runningmeans3, col=cols[4])
+title(main="stabilization of the running relative frequencies")
+```
+
+We see that at one thousand iterations the chain is becoming stable but it is not perfectly stabilized yet. We can take this 5000 t chain and burn the first 1000 iterations to see if we get a better result. We also take the final states of 3000 chains instead of only 500. It would be better to take also in this case longer chain, but is very slow from a computational point of view, so we content ourself with this. 
+```{r}
+burned_chain_1=chain_1[1001:5000]
+final_states = c()
+for (i in 1:3000){
+  chain_ = markov_chain(t=1000)
+  final_states[i] = chain_[1000]
+}
+
+
+```
+
+
+```{r}
+histo = rbind(prop.table(table(burned_chain_1)), prop.table(table(final_states)), stationary_distr)
+
+barplot(histo, col = c(cols[2], cols[3], cols[4]),border = 'white', main = 'Relative frequencies of MC and final state', beside = T , names.arg=c("S = 1", "S = 2", "S = 3"), legend = c("MC",'final state', 'stationary distr'))
+```
+
+Now the approximation is almost perfect, as we supposed.
+
+## <span> what happens if we start at $t=0$ from state $X_0=2$ instead of  $X_0=1$? </span>  
+
+As long as we take reasonably long chains, the impact of the initial state of the chain is negligible.
+
+```{r}
+
+par(mfrow=c(1,2))
+chain_a = markov_chain(t=25,start = 1)
+chain_b = markov_chain(t=25,start = 2)
+
+
+histo = rbind(prop.table(table(chain_a)), prop.table(table(chain_b)))
+
+barplot(histo, col = c(cols[2], cols[3]),border = 'white', main = 'Relative frequencies of MC with different starting points with 25 iterations', beside = T , names.arg=c("S = 1", "S = 2", "S = 3"),cex.main=0.7, legend = c("starting state:1",'starting state:2'))
+
+
+chain_a = markov_chain(t=100000,start = 1)
+chain_b = markov_chain(t=100000,start = 2)
+
+histo = rbind(prop.table(table(chain_a)), prop.table(table(chain_b)))
+
+barplot(histo, col = c(cols[2], cols[3]),border = 'white', main = 'with 100000 iterations', beside = T , names.arg=c("S = 1", "S = 2", "S = 3"), legend = c("starting state:1",'starting state:2'))
+
+
+```
+
