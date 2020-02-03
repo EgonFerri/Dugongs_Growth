@@ -1,11 +1,11 @@
-# Dugongs_Growth
+# Dugongs growth
 
 <p align="center">
 <img src="https://www.ideegreen.it/wp-content/uploads/2017/01/lamantini-2.jpg">
 </p>
 
 
-1 Bayes for dugongs
+## 1 Bayes for dugongs
 
 1.1 Illustrate the characteristics of the statistical model for dealing with the Dugong’s data.
 
@@ -47,7 +47,7 @@
 
 1.14 Which prediction is less precise?
 
-2 Markov chain
+## 2 Markov chain
 
 2.1 Starting at time t=0 in the state X0=1 simulate the Markov chain with distribution assigned as above for t=1000 consecutive times
 
