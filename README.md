@@ -1,6 +1,12 @@
 # Dugongs_Growth
- 
+
+<p align="center">
+<img src="https://www.ideegreen.it/wp-content/uploads/2017/01/lamantini-2.jpg">
+</p>
+
+
 1 Bayes for dugongs
+
 1.1 Illustrate the characteristics of the statistical model for dealing with the Dugong’s data.
 
 1.2 Derive the corresponding likelihood function.
@@ -23,7 +29,7 @@
 
 1.7 Show the 4 univariate trace-plots of the simulations of each parameter.
 
-1.8 Evaluate graphically the behaviour of the empirical averages I^t with growing t=1,...,T.
+1.8 Evaluate graphically the behaviour of the empirical averages $I^t$ with growing t=1,...,T.
 
 1.9 Provide estimates for each parameter together with the approximation error and explain how you have evaluated such error.
 
@@ -55,3 +61,4 @@ relative frequency of the 500 final states. What distribution are you approximat
 2.5 Is it well approximated by the simulated empirical relative frequencies computed in 2.6 and 2.7?
 
 2.6 what happens if we start at t=0 from state X0=2 instead of X0=1?
+
